@@ -1257,51 +1257,77 @@ function buildMC_EnVn(q) {
   <div id="feedback"></div><button class="btn btn-primary next-btn hidden" id="nextBtn" onclick="nextQ()">Next →</button>`;
 }
 
-// ===== HÀM HELPER: TỰ ĐỘNG CHIA TỪ NHIỄU THEO DẠNG CỦA TỪ ĐÚNG =====
-function matchWordForm(baseWord, formWord, targetWord) {
-  const base = baseWord.toLowerCase();
-  const form = formWord.toLowerCase();
-  const target = targetWord.toLowerCase();
+// ===== HELPER: Tìm từ đúng trong câu (loại bỏ mạo từ a/an/the) =====
+function findActualWordInSentence(baseWord, sentence) {
+  let cleanBase = baseWord.toLowerCase().replace(/^(a|an|the)\s+/, '');
+  const variants = new Set([cleanBase]);
+  variants.add(cleanBase + 's');
+  if (cleanBase.endsWith('y')) variants.add(cleanBase.slice(0, -1) + 'ies');
+  if (cleanBase.endsWith('s') || cleanBase.endsWith('sh') || cleanBase.endsWith('ch') || cleanBase.endsWith('x') || cleanBase.endsWith('z'))
+    variants.add(cleanBase + 'es');
+  variants.add(cleanBase + 'ed');
+  if (cleanBase.endsWith('e')) variants.add(cleanBase.slice(0, -1) + 'ing');
+  else variants.add(cleanBase + 'ing');
+  if (cleanBase.endsWith('y')) variants.add(cleanBase.slice(0, -1) + 'ied');
   
-  if (base === form) return targetWord;
-  if (form === base + 's') return targetWord + 's';
-  if (form === base + 'es') return targetWord + 'es';
-  if (base.endsWith('y') && form === base.slice(0, -1) + 'ies') {
-    return target.endsWith('y') ? targetWord.slice(0, -1) + 'ies' : targetWord + 's';
+  const words = sentence.split(/\b/);
+  for (let token of words) {
+    const clean = token.replace(/[^\w']/g, '').toLowerCase();
+    if (variants.has(clean)) return token;
   }
-  if (form === base + 'ed') return targetWord + 'ed';
-  if (form === base + 'd') return targetWord + 'd';
-  if (base.endsWith('y') && form === base.slice(0, -1) + 'ied') {
-    return target.endsWith('y') ? targetWord.slice(0, -1) + 'ied' : targetWord + 'ed';
-  }
-  if (form === base + 'ing') return targetWord + 'ing';
-  if (base.endsWith('e') && form === base.slice(0, -1) + 'ing') {
-    return target.endsWith('e') ? targetWord.slice(0, -1) + 'ing' : targetWord + 'ing';
-  }
-  return targetWord;
+  return cleanBase;
 }
 
+// ===== HELPER: Áp dụng dạng biến thể (không thêm mạo từ) =====
+function applyVariant(baseWord, actualWord, targetWord) {
+  let cleanBase = baseWord.toLowerCase().replace(/^(a|an|the)\s+/, '');
+  let cleanTarget = targetWord.toLowerCase().replace(/^(a|an|the)\s+/, '');
+  const actual = actualWord.toLowerCase();
+  
+  if (actual === cleanBase) return cleanTarget;
+  if (actual.startsWith(cleanBase)) {
+    const suffix = actual.slice(cleanBase.length);
+    if (suffix) return cleanTarget + suffix;
+  }
+  if (cleanBase.endsWith('y') && actual === cleanBase.slice(0, -1) + 'ies')
+    return cleanTarget.endsWith('y') ? cleanTarget.slice(0, -1) + 'ies' : cleanTarget + 's';
+  if (cleanBase.endsWith('y') && actual === cleanBase.slice(0, -1) + 'ied')
+    return cleanTarget.endsWith('y') ? cleanTarget.slice(0, -1) + 'ied' : cleanTarget + 'ed';
+  if (cleanBase.endsWith('e') && actual === cleanBase.slice(0, -1) + 'ing')
+    return cleanTarget.endsWith('e') ? cleanTarget.slice(0, -1) + 'ing' : cleanTarget + 'ing';
+  return cleanTarget + 's';
+}
+
+// ===== FILL IN THE BLANK (đã sửa lỗi) =====
 function buildFillBlank(q) {
-  const regex = new RegExp(`\\b${q.vocab.word}[a-z]*\\b`, 'i');
-  const match = q.vocab.example.match(regex);
-  const actualWordInSentence = match ? match[0] : q.vocab.word;
-  const blank = q.vocab.example.replace(regex, '_______');
-  const mixedOpts = [
-    { text: actualWordInSentence, isCorrect: true, origin: q.vocab.word },
-    ...q.wrongs.slice(0, 3).map(o => ({
-      text: matchWordForm(q.vocab.word, actualWordInSentence, o.word),
-      isCorrect: false,
-      origin: o.word
-    }))
+  const sentence = q.vocab.example;
+  const baseWord = q.vocab.word;
+  const actualWordInSentence = findActualWordInSentence(baseWord, sentence);
+  
+  const regex = new RegExp(`\\b${actualWordInSentence.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+  const blankSentence = sentence.replace(regex, '_______');
+  
+  const cleanBase = baseWord.replace(/^(a|an|the)\s+/i, '');
+  const correctAnswer = applyVariant(baseWord, actualWordInSentence, cleanBase);
+  
+  const opts = [
+    { text: correctAnswer, isCorrect: true },
+    ...q.wrongs.slice(0, 3).map(w => {
+      let cleanWrong = w.word.replace(/^(a|an|the)\s+/i, '');
+      return { text: applyVariant(baseWord, actualWordInSentence, cleanWrong), isCorrect: false };
+    })
   ];
-  const opts = shuffle(mixedOpts);
-  return `<div class="question-text">Complete the sentence:</div>
-  <div style="font-size:1.1rem;font-weight:700;padding:14px;background:var(--baby-blue-light);border-radius:12px;margin-bottom:20px">"${blank}"</div>
-  <div class="choices">
-    ${opts.map(o => `<button class="choice" data-val="${o.text}" data-correct="${actualWordInSentence}">${o.text}</button>`).join('')}
-  </div>
-  <div id="feedback"></div>
-  <button class="btn btn-primary next-btn hidden" id="nextBtn" onclick="nextQ()">Next →</button>`;
+  const shuffledOpts = shuffle(opts);
+  
+  return `
+    <div class="question-text">Complete the sentence:</div>
+    <div style="font-size:1.1rem;font-weight:700;padding:14px;background:var(--baby-blue-light);border-radius:12px;margin-bottom:20px">"${blankSentence}"</div>
+    <div class="choices">
+      ${shuffledOpts.map(o => `<button class="choice" data-val="${o.text}" data-correct="${correctAnswer}">${o.text}</button>`).join('')}
+    </div>
+    <div id="feedback"></div>
+    <button class="btn btn-primary next-btn hidden" id="nextBtn" onclick="nextQ()">Next →</button>
+  `;
 }
 
 function buildImageChoice(q) {
@@ -1353,25 +1379,39 @@ function attachHandlers() {
   choices.forEach(btn => {
     btn.addEventListener('click', function(e) {
       if (btn.disabled) return;
+      
       const selectedVal = btn.getAttribute('data-val');
       const correctVal = btn.getAttribute('data-correct');
       const isCorrect = (selectedVal === correctVal);
+      
+      // 1. Vô hiệu hóa tất cả để không chọn tiếp
       choices.forEach(c => c.disabled = true);
+      
+      // 2. Xóa tất cả class 'correct' và 'wrong' hiện có (đề phòng)
+      choices.forEach(c => {
+        c.classList.remove('correct', 'wrong');
+      });
+      
       if (isCorrect) {
+        // ĐÚNG: chỉ tô xanh button được chọn
         btn.classList.add('correct');
         showFeedback(true, `✅ Chính xác! "${correctVal}" là đáp án đúng.`);
         state.score++;
         addXP(5);
       } else {
+        // SAI: tô đỏ button vừa chọn
         btn.classList.add('wrong');
-        choices.forEach(c => {
+        // Tìm và tô xanh DUY NHẤT button có data-correct trùng với đáp án đúng
+        for (let c of choices) {
           if (c.getAttribute('data-correct') === correctVal) {
             c.classList.add('correct');
+            break; // chỉ một button đúng
           }
-        });
+        }
         showFeedback(false, `❌ Sai rồi! Đáp án đúng là: "${correctVal}".`);
         state.wrongList.push(state.questions[state.currentQ].vocab);
       }
+      
       if (nextBtn) nextBtn.classList.remove('hidden');
     });
   });
